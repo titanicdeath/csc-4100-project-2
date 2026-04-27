@@ -9,29 +9,27 @@
 
 >> Fill in the names and email addresses of your group members.
 
-Alden Stradling <ajstradling42@tntech.edu>
-
-(Solo submission. The project encourages group work but does
-not require it; this is an individual effort.)
+Alden Simmons <jasimmons43@tntech.edu>
 
 ---- PRELIMINARIES ----
 
 >> If you have any preliminary comments on your submission, notes for the
 >> TAs, or extra credit, please give them here.
 
-Per the rubric on page 6 of the Project 2 Resources document,
-this submission implements only the Alarm Clock portion. Priority
-Scheduling and the 4.4BSD Advanced Scheduler appear in the Pintos
-manual but are not on the grading rubric for this assignment, so
-those sections of the design document below are marked N/A.
+Per the rubric in the Project 2 Resources document, this submission
+implements the Alarm Clock. The other components named in the Pintos
+manual (Priority Scheduling, 4.4BSD Advanced Scheduler) are not on
+the grading rubric, so the corresponding sections below are marked
+N/A.
 
 >> Please cite any offline or online sources you consulted while
 >> preparing your submission, other than the Pintos documentation, course
 >> text, lecture notes, and course staff.
 
-- Stanford CS 140 Pintos manual (Sections A.2, A.3, B.6) -- provided
+- Stanford CS 140 Pintos manual, sections A.2 (Threads), A.3
+  (Synchronization), and B.6 (Fixed-Point Real Arithmetic) -- bundled
   with the assignment.
-- Project specification PDF (Project 2 Resources, CSC 4100-001).
+- Project 2 specification PDF (CSC 4100-001).
 
                              ALARM CLOCK
                              ===========
@@ -45,23 +43,21 @@ those sections of the design document below are marked N/A.
 Added to `struct thread` in threads/thread.h:
 
     int64_t wakeup_tick;
-        /* Absolute tick value at which this thread should be
+        /* Absolute tick count at which this thread should be
            returned to the ready queue. Set by timer_sleep, read
            by timer_interrupt. Meaningful only while the thread
            is on sleep_list. */
 
     struct list_elem sleep_elem;
-        /* Linkage for sleep_list. Distinct from the regular
-           `elem' member because that one is reused by other
-           subsystems (semaphore wait queues, etc.) and a sleeping
-           thread is also tracked through thread_block. */
+        /* Linkage for sleep_list. Distinct from `elem' because
+           `elem' is reused by other subsystems (semaphore wait
+           queues, etc.). */
 
 Added in devices/timer.c:
 
     static struct list sleep_list;
-        /* List of currently sleeping threads, kept sorted in
-           ascending order of wakeup_tick so the timer interrupt
-           handler only needs to inspect the head. */
+        /* Currently sleeping threads, sorted by wakeup_tick
+           ascending so the timer ISR only inspects the head. */
 
     static bool sleep_less (const struct list_elem *a,
                             const struct list_elem *b,
@@ -203,12 +199,12 @@ not anyone is sleeping.
                          PRIORITY SCHEDULING
                          ===================
 
-Not implemented for this project -- not on the grading rubric.
+Not implemented -- not on the grading rubric for this project.
 
                           ADVANCED SCHEDULER
                           ==================
 
-Not implemented for this project -- not on the grading rubric.
+Not implemented -- not on the grading rubric for this project.
 
                            SURVEY QUESTIONS
                            ================
@@ -216,10 +212,10 @@ Not implemented for this project -- not on the grading rubric.
 >> In your opinion, was this assignment, or any one of the three problems
 >> in it, too easy or too hard?  Did it take too long or too little time?
 
-The Alarm Clock alone is a reasonable scope for the time given.
-Most of the up-front cost is reading enough of the Pintos source
-tree to understand the existing thread / synchronization machinery
-well enough to know which primitives to reach for.
+The Alarm Clock alone is a reasonable scope. Most of the up-front
+cost is reading enough of the Pintos source tree to understand the
+existing thread and synchronization machinery well enough to know
+which primitives to reach for.
 
 >> Did you find that working on a particular part of the assignment gave
 >> you greater insight into some aspect of OS design, especially the
@@ -235,6 +231,4 @@ hadn't.
 >> future quarters to help them solve the problems?  Conversely, did you
 >> find any of our guidance to be misleading?
 
-The project spec lists Section B (4.4BSD Scheduler) as required
-reading but the rubric only grades Alarm Clock. Clarifying the
-scope up front would save students time.
+No comments.
