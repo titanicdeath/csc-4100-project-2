@@ -98,6 +98,10 @@ struct thread
     uint32_t *pagedir;                  /* Page directory. */
 #endif
 
+    /* Alarm clock. */
+    int64_t wakeup_tick;                /* Tick to wake on. */
+    struct list_elem sleep_elem;        /* Linkage for sleep_list. */
+
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
   };
