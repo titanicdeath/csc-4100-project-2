@@ -1,0 +1,64 @@
+============================================================
+PATCH 1: threads/thread.h
+============================================================
+
+Add two fields to `struct thread`. Find the struct definition
+(it has `tid`, `status`, `name`, `stack`, `priority`, `allelem`,
+`elem`, etc.) and add the new fields just before `unsigned magic`,
+so `magic` stays last (the manual is explicit about this for
+stack-overflow detection).
+
+Add:
+
+    /* Alarm clock. */
+    int64_t wakeup_tick;             /* Tick to wake on. */
+    struct list_elem sleep_elem;     /* Linkage for sleep_list. */
+
+So the tail of the struct should look like:
+
+    struct list_elem allelem;        /* List element for all threads list. */
+
+    /* Shared between thread.c and synch.c. */
+    struct list_elem elem;           /* List element. */
+
+#ifdef USERPROG
+    /* Owned by userprog/process.c. */
+    uint32_t *pagedir;               /* Page directory. */
+#endif
+
+    /* Alarm clock. */
+    int64_t wakeup_tick;             /* Tick to wake on. */
+    struct list_elem sleep_elem;     /* Linkage for sleep_list. */
+
+    /* Owned by thread.c. */
+    unsigned magic;                  /* Detects stack overflow. */
+  };
+
+============================================================
+PATCH 2: threads/thread.c -- init_thread()
+============================================================
+
+Find `init_thread()` (the static function, not `thread_init()`).
+At the end of its body, just before the `intr_set_level (old_level);`
+line, add:
+
+    t->wakeup_tick = 0;
+    /* sleep_elem: no init needed; only valid while on sleep_list,
+       and list_insert_ordered sets it on insertion. */
+
+That's it. No other thread.c changes are needed.
+
+============================================================
+PATCH 3: devices/timer.c
+============================================================
+
+Replace the entire file with the timer.c provided in this bundle.
+The diffs vs. the original:
+
+  - Added <list.h> include and a static `sleep_list`.
+  - Added `sleep_less()` comparator.
+  - Initialize `sleep_list` in `timer_init()`.
+  - Rewrote `timer_sleep()` to block instead of busy-wait.
+  - Extended `timer_interrupt()` to wake sleepers.
+
+No other files need to change.

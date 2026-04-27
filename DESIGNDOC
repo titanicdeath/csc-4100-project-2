@@ -1,0 +1,240 @@
+                        +--------------------+
+                        |      CSC 4100      |
+                        |     PROJECT 2:     |
+                        |      THREADS       |
+                        |   DESIGN DOCUMENT  |
+                        +--------------------+
+
+---- GROUP ----
+
+>> Fill in the names and email addresses of your group members.
+
+Alden Stradling <ajstradling42@tntech.edu>
+
+(Solo submission. The project encourages group work but does
+not require it; this is an individual effort.)
+
+---- PRELIMINARIES ----
+
+>> If you have any preliminary comments on your submission, notes for the
+>> TAs, or extra credit, please give them here.
+
+Per the rubric on page 6 of the Project 2 Resources document,
+this submission implements only the Alarm Clock portion. Priority
+Scheduling and the 4.4BSD Advanced Scheduler appear in the Pintos
+manual but are not on the grading rubric for this assignment, so
+those sections of the design document below are marked N/A.
+
+>> Please cite any offline or online sources you consulted while
+>> preparing your submission, other than the Pintos documentation, course
+>> text, lecture notes, and course staff.
+
+- Stanford CS 140 Pintos manual (Sections A.2, A.3, B.6) -- provided
+  with the assignment.
+- Project specification PDF (Project 2 Resources, CSC 4100-001).
+
+                             ALARM CLOCK
+                             ===========
+
+---- DATA STRUCTURES ----
+
+>> A1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', or
+>> enumeration.  Identify the purpose of each in 25 words or less.
+
+Added to `struct thread` in threads/thread.h:
+
+    int64_t wakeup_tick;
+        /* Absolute tick value at which this thread should be
+           returned to the ready queue. Set by timer_sleep, read
+           by timer_interrupt. Meaningful only while the thread
+           is on sleep_list. */
+
+    struct list_elem sleep_elem;
+        /* Linkage for sleep_list. Distinct from the regular
+           `elem' member because that one is reused by other
+           subsystems (semaphore wait queues, etc.) and a sleeping
+           thread is also tracked through thread_block. */
+
+Added in devices/timer.c:
+
+    static struct list sleep_list;
+        /* List of currently sleeping threads, kept sorted in
+           ascending order of wakeup_tick so the timer interrupt
+           handler only needs to inspect the head. */
+
+    static bool sleep_less (const struct list_elem *a,
+                            const struct list_elem *b,
+                            void *aux UNUSED);
+        /* Less-than comparator over wakeup_tick, used with
+           list_insert_ordered. */
+
+---- ALGORITHMS ----
+
+>> A2: Briefly describe what happens in a call to timer_sleep(),
+>> including the effects of the timer interrupt handler.
+
+A call to timer_sleep(N) where N <= 0 returns immediately. This
+satisfies the alarm-zero and alarm-negative tests, which expect
+prompt return without blocking.
+
+For positive N, the calling thread:
+
+  1. Asserts that interrupts are currently enabled. Sleeping with
+     interrupts off would deadlock.
+  2. Reads the current tick count and computes its absolute
+     wakeup_tick = current + N, storing it in the thread struct.
+  3. Disables interrupts.
+  4. Inserts itself into sleep_list using list_insert_ordered with
+     sleep_less as the comparator, so the list stays sorted by
+     wakeup_tick ascending.
+  5. Calls thread_block(), transitioning to THREAD_BLOCKED. The
+     scheduler then picks another thread to run.
+  6. Once eventually unblocked and rescheduled, restores the prior
+     interrupt level and returns.
+
+The timer interrupt handler runs once per tick. After incrementing
+the global tick counter and calling thread_tick(), it walks the
+front of sleep_list and, while the front thread's wakeup_tick is
+<= current ticks, pops it from the list and calls thread_unblock()
+on it. Because the list is sorted, the loop stops as soon as it
+finds a thread whose wakeup_tick is still in the future.
+
+>> A3: What steps are taken to minimize the amount of time spent in
+>> the timer interrupt handler?
+
+Two:
+
+  - sleep_list is kept sorted by wakeup_tick at insertion time
+    rather than scanned each tick. The interrupt handler therefore
+    inspects only as many threads as need to wake on this tick,
+    plus one more (the next sleeper, which causes the loop to
+    break). On the common tick where nothing wakes, the handler
+    does a single pointer comparison and exits.
+
+  - The wakeup decision uses an integer comparison on a field
+    already in the thread struct. No allocation, no list traversal
+    past the front, no synchronization primitives.
+
+The cost of this choice is paid at insertion: list_insert_ordered
+is O(k) where k is the number of currently sleeping threads. That
+is the right tradeoff. timer_sleep is called from a normal thread
+context, where a longer code path is acceptable, while the
+interrupt handler is on the critical path of every tick.
+
+---- SYNCHRONIZATION ----
+
+>> A4: How are race conditions avoided when multiple threads call
+>> timer_sleep() simultaneously?
+
+sleep_list is protected by disabling interrupts around the
+insert-and-block sequence in timer_sleep. Two threads on a
+uniprocessor cannot truly run simultaneously; the concern is
+preemption. The vulnerable window runs from "decided to insert
+into the list" through "fully blocked." If a context switch
+occurred mid-window, another thread could observe the list in
+an inconsistent state, or could insert itself ahead and have its
+block race with this one.
+
+Disabling interrupts closes that window. This is not using
+interrupt disabling as a general synchronization mechanism; it is
+using it specifically to coordinate with timer_interrupt, an
+external interrupt handler. The Pintos manual (A.3.1) and the
+project spec (Section 4.3) explicitly endorse this use: "the only
+class of problem best solved by disabling interrupts is
+coordinating data shared between a kernel thread and an interrupt
+handler."
+
+>> A5: How are race conditions avoided when a timer interrupt occurs
+>> during a call to timer_sleep()?
+
+This is the dangerous case the design was built around. If the
+timer interrupt fired between the list insert and the call to
+thread_block(), it could observe that the wakeup_tick had already
+passed (in a long-disabled-interrupts scenario where ticks
+advanced in the meantime), call thread_unblock() on a thread that
+is actually still THREAD_RUNNING, and assertion-fail or corrupt
+state. Even short of that, the thread would then proceed to call
+thread_block() with no one left to wake it, and sleep forever.
+
+Disabling interrupts around the insert and block makes the two
+operations atomic from the interrupt handler's point of view. By
+the time interrupts are re-enabled (thread_block does not re-enable
+them; the saved old_level gets restored after the block returns),
+the thread is THREAD_BLOCKED, on sleep_list, and ready to be woken
+correctly.
+
+---- RATIONALE ----
+
+>> A6: Why did you choose this design?  In what ways is it superior to
+>> another design you considered?
+
+The main alternative I considered was giving each thread its own
+semaphore initialized to 0, having timer_sleep call sema_down on
+it, and having the timer interrupt call sema_up on threads whose
+wakeup_tick had arrived. That works, and it pushes the
+synchronization concern into the well-tested semaphore primitive.
+
+I chose direct thread_block / thread_unblock instead for three
+reasons:
+
+  1. It adds no per-thread state beyond what is already required.
+     wakeup_tick and sleep_elem are unavoidable. A semaphore would
+     add a third field -- a struct semaphore -- to every thread,
+     when only sleeping threads ever use it.
+
+  2. Semaphores are built on top of thread_block / thread_unblock
+     internally (synch.c's sema_down ultimately calls
+     thread_block), so using them here would just add a layer of
+     indirection without changing what is actually happening.
+
+  3. The interrupt-disable window is unavoidable either way. A
+     semaphore-based design still needs to insert into a sleep
+     list shared with the ISR, so the semaphore would not even
+     replace the disable -- it would just sit on top of it.
+
+The sorted-list-plus-front-walk approach in the ISR was chosen
+over an unsorted list (which would require scanning all sleepers
+every tick) for the reasons in A3. With many sleeping threads, an
+unsorted list would make every timer tick proportionally more
+expensive, and timer ticks happen 100 times a second whether or
+not anyone is sleeping.
+
+                         PRIORITY SCHEDULING
+                         ===================
+
+Not implemented for this project -- not on the grading rubric.
+
+                          ADVANCED SCHEDULER
+                          ==================
+
+Not implemented for this project -- not on the grading rubric.
+
+                           SURVEY QUESTIONS
+                           ================
+
+>> In your opinion, was this assignment, or any one of the three problems
+>> in it, too easy or too hard?  Did it take too long or too little time?
+
+The Alarm Clock alone is a reasonable scope for the time given.
+Most of the up-front cost is reading enough of the Pintos source
+tree to understand the existing thread / synchronization machinery
+well enough to know which primitives to reach for.
+
+>> Did you find that working on a particular part of the assignment gave
+>> you greater insight into some aspect of OS design, especially the
+>> parts that you went over in lecture?
+
+Working through why the interrupt-disable window is necessary --
+specifically that thread_block has to be atomic with respect to
+the ISR that would unblock it -- made the lecture material on
+critical sections concrete in a way that user-space examples
+hadn't.
+
+>> Is there some particular fact or hint we should give students in
+>> future quarters to help them solve the problems?  Conversely, did you
+>> find any of our guidance to be misleading?
+
+The project spec lists Section B (4.4BSD Scheduler) as required
+reading but the rubric only grades Alarm Clock. Clarifying the
+scope up front would save students time.
